@@ -21,12 +21,12 @@ class ResponseDataType(Enum):
     PUSH = ">"
 
 
-def build_response(
-    data_type: ResponseDataType, data: str = None, error: str = None
-) -> bytes:
-    resp_buff = bytearray()
-    if data_type == ResponseDataType.SIMPLE_STRING:
-        resp_buff.extend(f"{data_type.value}{data}{CLRF}".encode())
-    if data_type == ResponseDataType.BULK_STRING:
-        resp_buff.extend(f"{data_type.value}{len(data)}{CLRF}{data}{CLRF}".encode())
-    return resp_buff
+class Cache:
+    def __init__(self):
+        self.cache = {}
+
+    def set(self, key, value, expire=None):
+        self.cache[key] = (value, expire)
+
+    def get(self, key):
+        return self.cache.get(key)
