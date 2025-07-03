@@ -7,7 +7,6 @@ def send_request(client_socket: socket.socket, addr):
     while not close:
         req_buff = client_socket.recv(1024)
         print(f"Received request from {addr}")
-        print(req_buff.decode("utf-8"))
         if req_buff is None or len(req_buff) == 0:
             break
 
