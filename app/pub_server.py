@@ -17,12 +17,19 @@ def handle_request(request_buffer: bytes, cache: Cache) -> Tuple[bytes, bool]:
         return (build_response(ResponseDataType.BULK_STRING, cmd[1]), False)
 
     if cmd[0] == "SET":
-        cache.set(cmd[1], cmd[2])
+        expire = -1
+        if len(cmd) > 3:
+            if cmd[3].lower() == "px":
+                expire = int(cmd[4]) / 1000
+            else:
+                expire = int(cmd[4])
+        cache.set(cmd[1], cmd[2], expire)
         return (build_response(ResponseDataType.SIMPLE_STRING, "OK"), False)
+
     if cmd[0] == "GET":
         value = cache.get(cmd[1])
         if value:
-            return (build_response(ResponseDataType.BULK_STRING, value[0]), False)
+            return (build_response(ResponseDataType.BULK_STRING, value), False)
         else:
             return (build_response(ResponseDataType.BULK_STRING, None), False)
 

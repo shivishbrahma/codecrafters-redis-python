@@ -1,4 +1,6 @@
 from enum import Enum
+import threading
+
 
 CLRF = "\r\n"
 
@@ -25,8 +27,14 @@ class Cache:
     def __init__(self):
         self.cache = {}
 
-    def set(self, key, value, expire=None):
-        self.cache[key] = (value, expire)
+    def set(self, key: str, value: str, expire: float = -1):
+        self.cache[key] = value
 
-    def get(self, key):
+        if expire > 0:
+            threading.Timer(expire, self.delete, args=[key]).start()
+
+    def get(self, key: str):
         return self.cache.get(key)
+
+    def delete(self, key: str):
+        self.cache.pop(key, None)
