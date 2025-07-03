@@ -2,6 +2,7 @@ import socket  # noqa: F401
 import threading
 from .pub_server import handle_request
 from .pub_redis import Cache
+from argparse import ArgumentParser
 
 def send_request(client_socket: socket.socket, addr, cache: Cache):
     close = False
@@ -24,9 +25,17 @@ def start_server(server_socket: socket.socket, cache: Cache):
         threading.Thread(target=send_request, args=(client_socket, addr, cache)).start()
 
 def main():
-    print("Logs from your program will appear here!")
+    parser = ArgumentParser()
+    parser.add_argument("--dir", type=str, help="Directory to store data")
+    parser.add_argument("--dbfilename", type=str, help="DB file name to store data")
 
-    cache = Cache()
+    args = parser.parse_args()
+
+    if args.dir is not None:
+        cache = Cache(args.dir, args.dbfilename)
+    else:
+        cache = Cache()
+
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     print(f"Server started on {server_socket.getsockname()}")
     try:

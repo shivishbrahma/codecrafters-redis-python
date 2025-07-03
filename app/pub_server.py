@@ -36,12 +36,19 @@ def handle_request(request_buffer: bytes, cache: Cache) -> Tuple[bytes, bool]:
     if cmd[0] == "PING":
         return (build_response(ResponseDataType.SIMPLE_STRING, "PONG"), False)
 
+    if cmd[0] == "CONFIG":
+        if cmd[1] == "GET":
+            return (
+                build_response(
+                    ResponseDataType.ARRAY, [cmd[2], cache.get_config(cmd[2])]
+                ),
+                False,
+            )
+
     return (build_response(ResponseDataType.SIMPLE_ERROR, "Unknown command"), False)
 
 
-def build_response(
-    data_type: ResponseDataType, data: str = None, error: str = None
-) -> bytes:
+def build_response(data_type: ResponseDataType, data=None) -> bytes:
     resp_buff = bytearray()
     if data_type == ResponseDataType.SIMPLE_STRING:
         resp_buff.extend(f"{data_type.value}{data}{CLRF}".encode())
@@ -49,4 +56,8 @@ def build_response(
         data_len = len(data) if data else -1
         data = f"{CLRF}{data}" if data else ""
         resp_buff.extend(f"{data_type.value}{data_len}{data}{CLRF}".encode())
+    if data_type == ResponseDataType.ARRAY:
+        resp_buff.extend(f"{data_type.value}{len(data)}{CLRF}".encode())
+        for item in data:
+            resp_buff.extend(build_response(ResponseDataType.BULK_STRING, item))
     return resp_buff

@@ -24,8 +24,10 @@ class ResponseDataType(Enum):
 
 
 class Cache:
-    def __init__(self):
+    def __init__(self, dir="/tmp/redis-data", dbfilename="cache.rdb"):
         self.cache = {}
+        self.dir = dir
+        self.dbfilename = dbfilename
 
     def set(self, key: str, value: str, expire: float = -1):
         self.cache[key] = value
@@ -38,3 +40,11 @@ class Cache:
 
     def delete(self, key: str):
         self.cache.pop(key, None)
+
+    def get_config(self, key:str):
+        if key == "dir":
+            return self.dir
+        elif key == "dbfilename":
+            return self.dbfilename
+        else:
+            return None
