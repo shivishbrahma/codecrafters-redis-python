@@ -47,6 +47,6 @@ def build_response(
         resp_buff.extend(f"{data_type.value}{data}{CLRF}".encode())
     if data_type == ResponseDataType.BULK_STRING:
         data_len = len(data) if data else -1
-        data = data if data else ""
-        resp_buff.extend(f"{data_type.value}{data_len}{CLRF}{data}{CLRF}".encode())
+        data = f"{CLRF}{data}" if data else ""
+        resp_buff.extend(f"{data_type.value}{data_len}{data}{CLRF}".encode())
     return resp_buff
