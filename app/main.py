@@ -42,6 +42,9 @@ def main():
         start_server(server_socket, cache)
     except KeyboardInterrupt:
         print("\nServer is shutting down...")
+    finally:
+        server_socket.close()
+        # cache.save()
 
 
 if __name__ == "__main__":
