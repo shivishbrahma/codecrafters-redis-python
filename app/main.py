@@ -28,6 +28,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--dir", type=str, help="Directory to store data")
     parser.add_argument("--dbfilename", type=str, help="DB file name to store data")
+    parser.add_argument("--port", type=int, default=6379, help="Port to listen on")
 
     args = parser.parse_args()
 
@@ -35,8 +36,9 @@ def main():
         cache = Cache(args.dir, args.dbfilename)
     else:
         cache = Cache()
+    port = args.port
 
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
+    server_socket = socket.create_server(("localhost", port), reuse_port=True)
     print(f"Server started on {server_socket.getsockname()}")
     try:
         start_server(server_socket, cache)
