@@ -16,6 +16,9 @@ def handle_request(request_buffer: bytes, cache: Cache) -> Tuple[bytes, bool]:
     if cmd[0] == "ECHO":
         return (build_response(ResponseDataType.BULK_STRING, cmd[1]), False)
 
+    if cmd[0] == "INFO":
+        return (build_response(ResponseDataType.BULK_STRING, "role:master"), False)
+
     if cmd[0] == "SET":
         expire = -1
         unit = "s"
