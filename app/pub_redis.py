@@ -3,6 +3,7 @@ import threading
 import os
 import struct
 import re
+import time
 
 CLRF = "\r\n"
 
@@ -26,15 +27,23 @@ class ResponseDataType(Enum):
 
 
 class CacheValue:
-    def __init__(self, value, expire):
+    def __init__(self, value, expired_at, unit="s"):
         self.value = value
-        self.expire = expire
+        self.expired_at = expired_at
+        self.unit = unit
+
+    def is_expired(self):
+        if self.expired_at == -1:
+            return False
+        current_time = time.time()
+        expire_in_s = self.expired_at if self.unit == "s" else self.expired_at / 1000
+        return current_time > expire_in_s
 
     def __str__(self):
         return f"{self.value}"
 
     def __repr__(self):
-        return f"CacheValue(value={self.value}, expire={self.expire})"
+        return f"CacheValue(value={self.value}, expired_at={self.expired_at}, unit={self.unit})"
 
 
 class RDBFile:
@@ -49,7 +58,6 @@ class RDBFile:
         if not header.startswith(b"REDIS"):
             raise Exception("Invalid RDB file")
         self.__version = int(header[-4:].decode())
-        print("Version: ", self.__version)
 
     def __read_length(self, file):
         first_byte = file.read(1)
@@ -68,11 +76,13 @@ class RDBFile:
 
     def __read_integer(self, file, length):
         if length == 0:
-            return struct.pack(">B", file.read(1)[0])[0]
+            return struct.pack("<B", file.read(1)[0])[0]
         elif length == 1:
-            return struct.unpack(">H", file.read(2))[0]
+            return struct.unpack("<H", file.read(2))[0]
         elif length == 2:
-            return struct.unpack(">I", file.read(4))[0]
+            return struct.unpack("<I", file.read(4))[0]
+        elif length == 3:
+            return struct.unpack("<Q", file.read(8))[0]
         return None
 
     def __read_compressed_string(self, file):
@@ -107,42 +117,49 @@ class RDBFile:
                     aux_val = self.__read_string(f)
                     self.__metadata[aux_key] = aux_val
                     continue
-                elif opcode == 0xFE:  # SELECTDB
-                    db_num = self.__read_length(f)[1]
-                    self.__metadata["db"] = db_num
-                    continue
+
                 elif opcode == 0xFB:  # RESIZEDB
                     self.__metadata["size_of_hash_table"] = self.__read_length(f)[1]
                     self.__metadata["size_of_expiry_hash_table"] = self.__read_length(
                         f
                     )[1]
-                    # key = self.__read_string(f)
-                    # val = self.__read_string(f)
-                    for i in range(self.__metadata["size_of_hash_table"]):
-                        type_byte = f.read(1)[0]
-                        if type_byte == 0x00:
-                            key = self.__read_string(f)
-                            val = self.__read_string(f)
-                            data[key] = CacheValue(val, -1)
                     continue
-                # elif opcode == 0xFD: # EXPIRETIME
-                #     key = self.__read_string(f)
-                #     val = self.__read_string(f)
-                #     data[key] = val
-                #     continue
-                # elif opcode == 0xFC: # EXPIRETIMEMS
-                #     key = self.__read_string(f)
-                #     val = self.__read_string(f)
-                #     data[key] = val
-                #     continue
+
+                elif opcode == 0x00:
+                    key = self.__read_string(f)
+                    val = self.__read_string(f)
+                    data[key] = CacheValue(val, -1)
+                    continue
+
+                elif opcode == 0xFC:  # EXPIRETIMEMS
+                    expired_at = self.__read_integer(f, 3)
+                    data_type = f.read(1)[0]
+                    key = self.__read_string(f)
+                    val = self.__read_string(f)
+                    data[key] = CacheValue(val, expired_at=expired_at, unit="ms")
+                    continue
+
+                elif opcode == 0xFD:  # EXPIRETIME
+                    expired_at = self.__read_integer(f, 2)
+                    data_type = f.read(1)[0]
+                    key = self.__read_string(f)
+                    val = self.__read_string(f)
+                    data[key] = CacheValue(val, expired_at=expired_at)
+                    continue
+
+                elif opcode == 0xFE:  # SELECTDB
+                    db_num = self.__read_length(f)[1]
+                    self.__metadata["db"] = db_num
+                    continue
+
                 elif opcode == 0xFF:  # EOF
                     break
+
                 else:
                     print(f"Unsupported opcode: {hex(opcode)}")
                     break
 
         print("Metadata: ", self.__metadata)
-        print("Data: ", data)
 
         return data
 
@@ -162,19 +179,36 @@ class Cache:
         self.__dir = dir if dir else os.getcwd()
         self.__dbfilename = dbfilename
         self.__rdb = RDBFile(os.path.join(self.__dir, self.__dbfilename))
-        self.__cache = self.__rdb.read()
-        if self.__cache:
+        self.__cache = {}
+
+        loaded_cache = self.__rdb.read()
+        if loaded_cache:
+            for key, val in loaded_cache.items():
+                self.__cache[key] = val
+            print(self.__cache)
             print("Cache loaded from RDB file")
         else:
             print("Cache initialized from scratch")
 
-    def set(self, key: str, value: str, expire: float = -1):
-        self.__cache[key] = CacheValue(value, expire)
-
+    def set(self, key: str, value: str, expire: float = -1, unit="s"):
+        current_time = time.time()
         if expire > 0:
-            threading.Timer(expire, self.delete, args=[key]).start()
+            expired_at = (current_time * 1000 if unit == "ms" else current_time) + expire
+        else:
+            expired_at = -1
+
+        self.__cache[key] = CacheValue(
+            value,
+            expired_at,
+            unit,
+        )
 
     def get(self, key: str) -> CacheValue | None:
+        if key not in self.__cache:
+            return None
+        if self.__cache[key].is_expired():
+            self.delete(key)
+            return None
         return self.__cache.get(key)
 
     def delete(self, key: str):
@@ -200,12 +234,7 @@ class Cache:
     def keys(self, pattern: str):
         if pattern:
             pat = re.compile(pattern=pattern.replace("*", ".*"))
-            print(pattern)
-            return [
-                key
-                for key in self.__cache.keys()
-                if pat.findall(key)
-            ]
+            return [key for key in self.__cache.keys() if pat.findall(key)]
 
         return list(self.__cache.keys())
 

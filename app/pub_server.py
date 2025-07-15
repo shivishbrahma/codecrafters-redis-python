@@ -18,12 +18,14 @@ def handle_request(request_buffer: bytes, cache: Cache) -> Tuple[bytes, bool]:
 
     if cmd[0] == "SET":
         expire = -1
+        unit = "s"
         if len(cmd) > 3:
             if cmd[3].lower() == "px":
-                expire = int(cmd[4]) / 1000
+                expire = int(cmd[4])
+                unit = "ms"
             else:
                 expire = int(cmd[4])
-        cache.set(cmd[1], cmd[2], expire)
+        cache.set(cmd[1], cmd[2], expire, unit)
         return (build_response(ResponseDataType.SIMPLE_STRING, "OK"), False)
 
     if cmd[0] == "GET":
