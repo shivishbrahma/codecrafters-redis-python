@@ -1,98 +1,123 @@
 from typing import Tuple
 import re
 import socket
-from .pub_redis import CLRF, RedisResponseDataType, RedisCache
+from .pub_redis import CLRF, RedisDataType, RedisCache, RedisEntity, RedisRDBFile
+
+# def parse_request
 
 
 def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, bool]:
-    request_str = request_buffer.decode("utf-8").strip()
-    cmd = []
-    if request_str.startswith(RedisResponseDataType.ARRAY.value):
-        len_cmd = int(request_str.split(CLRF)[0][1:])
-        for i in range(len_cmd):
-            cmd.append(request_str.split(CLRF)[2 * (i + 1)])
+    request_entity = RedisEntity.from_buffer(request_buffer)
+    print(request_entity.data[0])
 
-    print(cmd)
-    if cmd[0] == "ECHO":
-        return (build_response(RedisResponseDataType.BULK_STRING, cmd[1]), False)
+    cmd = str(request_entity.data[0])
+    if len(request_entity.data) > 1:
+        params = [str(param_entity) for param_entity in request_entity.data[1:]]
 
-    if cmd[0] == "INFO":
-        if cmd[1] == "replication":
+    if cmd == "ECHO":
+        return (
+            RedisEntity.from_data(RedisDataType.BULK_STRING, params[0]).to_buffer(),
+            False,
+        )
+
+    if cmd == "INFO":
+        if params[0] == "replication":
             replica_info = f"role:{cache.env.get('role')}"
             replica_info += f"\nmaster_replid:{cache.env.get('nmaster_replid')}"
-            replica_info += f"\master_repl_offset:{cache.env.get('master_repl_offset')}"
+            replica_info += (
+                f"\nmaster_repl_offset:{cache.env.get('master_repl_offset')}"
+            )
             return (
-                build_response(RedisResponseDataType.BULK_STRING, replica_info),
+                RedisEntity.from_data(
+                    RedisDataType.BULK_STRING, replica_info
+                ).to_buffer(),
                 False,
             )
 
-    if cmd[0] == "SET":
+    if cmd == "SET":
         expire = -1
         unit = "s"
-        if len(cmd) > 3:
-            if cmd[3].lower() == "px":
-                expire = int(cmd[4])
+        if len(params) > 2:
+            if params[2].lower() == "px":
+                expire = int(params[3])
                 unit = "ms"
             else:
-                expire = int(cmd[4])
-        cache.set(cmd[1], cmd[2], expire, unit)
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
+                expire = int(params[3])
+        cache.set(params[0], params[1], expire, unit)
+        return (
+            RedisEntity.from_data(RedisDataType.SIMPLE_STRING, "OK").to_buffer(),
+            False,
+        )
 
-    if cmd[0] == "GET":
-        value = cache.get(cmd[1])
+    if cmd == "GET":
+        value = cache.get(params[0])
         if value:
             return (
-                build_response(RedisResponseDataType.BULK_STRING, value.value),
+                RedisEntity.from_data(
+                    RedisDataType.BULK_STRING, value.value
+                ).to_buffer(),
                 False,
             )
         else:
-            return (build_response(RedisResponseDataType.BULK_STRING, None), False)
-
-    if cmd[0] == "DEL":
-        cache.delete(cmd[1])
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
-
-    if cmd[0] == "KEYS":
-        keys = cache.keys(cmd[1])
-        return (build_response(RedisResponseDataType.ARRAY, keys), False)
-
-    if cmd[0] == "PING":
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, "PONG"), False)
-
-    if cmd[0] == "CONFIG":
-        if cmd[1] == "GET":
             return (
-                build_response(
-                    RedisResponseDataType.ARRAY, [cmd[2], cache.get_config(cmd[2])]
-                ),
+                RedisEntity.from_data(RedisDataType.BULK_STRING, None).to_buffer(),
                 False,
             )
 
-    if cmd[0] == "REPLCONF":
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
+    if cmd == "DEL":
+        cache.delete(params[0])
+        return (
+            RedisEntity.from_data(RedisDataType.SIMPLE_STRING, "OK").to_buffer(),
+            False,
+        )
 
-    if cmd[0] == "PSYNC":
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, f"FULLRESYNC {cache.env.get('replid')} 0"), True)
+    if cmd == "KEYS":
+        keys = cache.keys(params[0])
+        return (RedisEntity.from_data(RedisDataType.ARRAY, keys).to_buffer(), False)
+
+    if cmd == "PING":
+        print(RedisEntity.from_data(RedisDataType.SIMPLE_STRING, "PONG"))
+        return (
+            RedisEntity.from_data(RedisDataType.SIMPLE_STRING, "PONG").to_buffer(),
+            False,
+        )
+
+    if cmd == "CONFIG":
+        if params[0] == "GET":
+            return (
+                RedisEntity.from_data(
+                    RedisDataType.ARRAY, [params[1], cache.get_config(params[1])]
+                ).to_buffer(),
+                False,
+            )
+
+    if cmd == "REPLCONF":
+        return (
+            RedisEntity.from_data(RedisDataType.SIMPLE_STRING, "OK").to_buffer(),
+            False,
+        )
+
+    if cmd == "PSYNC":
+        rdb = RedisRDBFile()
+        return (
+            [
+                RedisEntity.from_data(
+                    RedisDataType.SIMPLE_STRING,
+                    f"FULLRESYNC {cache.env.get('replid')} 0",
+                ).to_buffer(),
+                RedisEntity.from_data(
+                    RedisDataType.BULK_STRING, rdb.to_bytes()
+                ).to_buffer(),
+            ],
+            False,
+        )
 
     return (
-        build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"),
+        RedisEntity.from_data(
+            RedisDataType.SIMPLE_ERROR, "Unknown command"
+        ).to_buffer(),
         False,
     )
-
-
-def build_response(data_type: RedisResponseDataType, data=None) -> bytes:
-    resp_buff = bytearray()
-    if data_type == RedisResponseDataType.SIMPLE_STRING:
-        resp_buff.extend(f"{data_type.value}{data}{CLRF}".encode())
-    if data_type == RedisResponseDataType.BULK_STRING:
-        data_len = len(data) if data else -1
-        data = f"{CLRF}{data}" if data else ""
-        resp_buff.extend(f"{data_type.value}{data_len}{data}{CLRF}".encode())
-    if data_type == RedisResponseDataType.ARRAY:
-        resp_buff.extend(f"{data_type.value}{len(data)}{CLRF}".encode())
-        for item in data:
-            resp_buff.extend(build_response(RedisResponseDataType.BULK_STRING, item))
-    return resp_buff
 
 
 def init_replica(env):
@@ -102,33 +127,33 @@ def init_replica(env):
     master_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     master_socket.connect((master_host, master_port))
 
-    master_socket.send(build_response(RedisResponseDataType.ARRAY, ["PING"]))
+    master_socket.send(RedisEntity.from_data(RedisDataType.ARRAY, ["PING"]).to_buffer())
     response = master_socket.recv(1024)
     print(f"Master: {response}")
 
     master_socket.send(
-        build_response(
-            RedisResponseDataType.ARRAY,
+        RedisEntity.from_data(
+            RedisDataType.ARRAY,
             ["REPLCONF", "listening-port", str(replica_port)],
-        )
+        ).to_buffer()
     )
     response = master_socket.recv(1024)
     print(f"Master: {response}")
 
     master_socket.send(
-        build_response(
-            RedisResponseDataType.ARRAY,
+        RedisEntity.from_data(
+            RedisDataType.ARRAY,
             ["REPLCONF", "capa", "eof"],
-        )
+        ).to_buffer()
     )
     response = master_socket.recv(1024)
     print(f"Master: {response}")
 
     master_socket.send(
-        build_response(
-            RedisResponseDataType.ARRAY,
+        RedisEntity.from_data(
+            RedisDataType.ARRAY,
             ["PSYNC", "?", "-1"],
-        )
+        ).to_buffer()
     )
     response = master_socket.recv(1024)
     print(f"Master: {response}")

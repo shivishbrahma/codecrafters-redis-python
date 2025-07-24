@@ -13,8 +13,13 @@ def send_request(client_socket: socket.socket, addr, cache: RedisCache):
         if req_buff is None or len(req_buff) == 0:
             break
 
-        resp, close = handle_request(req_buff, cache)
-        client_socket.sendall(resp)
+        response, close = handle_request(req_buff, cache)
+        if isinstance(response, list):
+            for res in response:
+                client_socket.send(res)
+        else:
+            client_socket.sendall(response)
+
     print("Client closed connection")
     client_socket.close()
 
@@ -37,21 +42,21 @@ def main():
     args = parser.parse_args()
 
     env = RedisEnvironment()
-    if args.port is not None:
+    if args.port:
         env.set("port", args.port)
-    if args.replicaof is not None:
+    if args.replicaof:
         print("Replica: ", args.replicaof)
         env.set("replicaof", args.replicaof)
-    if args.dir is not None:
+    if args.dir:
         env.set("dir", args.dir)
-    if args.dbfilename is not None:
+    if args.dbfilename:
         env.set("dbfilename", args.dbfilename)
 
     cache = RedisCache(env=env)
 
     port = args.port
 
-    if env.get("replicaof") is not None:
+    if env.get("replicaof"):
         init_replica(env)
 
     server_socket = socket.create_server(("localhost", port), reuse_port=True)

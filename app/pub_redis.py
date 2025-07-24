@@ -8,7 +8,7 @@ import time
 CLRF = "\r\n"
 
 
-class RedisResponseDataType(Enum):
+class RedisDataType(Enum):
     SIMPLE_STRING = "+"
     SIMPLE_ERROR = "-"
     INTEGER = ":"
@@ -24,6 +24,92 @@ class RedisResponseDataType(Enum):
     ATTRIBUTE = "|"
     SETS = "~"
     PUSH = ">"
+
+
+class RedisEntity:
+    @staticmethod
+    def from_buffer(buff: bytes):
+        return RedisEntity(buff)
+
+    @staticmethod
+    def from_data(data_type: RedisDataType, data=None):
+        if data_type == RedisDataType.ARRAY:
+            data = [
+                RedisEntity.from_data(RedisDataType.BULK_STRING, ele) for ele in data
+            ]
+        return RedisEntity(data_type=data_type, data=data)
+
+    def to_buffer(self):
+        data_type = self.__data_type
+        data = self.__data
+
+        resp_buff = bytearray()
+        resp_buff.extend(f"{data_type.value}".encode())
+
+        if data_type == RedisDataType.SIMPLE_STRING:
+            resp_buff.extend(f"{data}{CLRF}".encode())
+        if data_type == RedisDataType.BULK_STRING:
+            resp_buff.extend(str(len(data) if data else -1).encode())
+            resp_buff.extend(CLRF.encode())
+            if isinstance(data, bytearray):
+                resp_buff.extend(data)
+            elif data:
+                resp_buff.extend(data.encode())
+                resp_buff.extend(CLRF.encode())
+
+            # data = f"{CLRF}{data}" if data else ""
+            # resp_buff.extend(f"{data_len}{data}{CLRF}".encode())
+        if data_type == RedisDataType.ARRAY:
+            resp_buff.extend(f"{len(data)}{CLRF}".encode())
+            for item in data:
+                resp_buff.extend(item.to_buffer())
+        return resp_buff
+
+    def __init__(
+        self, buff: bytes = None, data_type=RedisDataType.SIMPLE_STRING, data=""
+    ):
+        self.__data_type = data_type
+        self.__data = data
+        if buff:
+            self.__parse__(buff)
+
+    def __parse__(self, buff: bytes):
+        redis_str = buff.decode()
+        if redis_str.startswith(RedisDataType.ARRAY.value):
+            self.__data_type = RedisDataType.ARRAY
+            self.__data = []
+            idx = redis_str.find(CLRF)
+            len_cmd = int(redis_str[1:idx])
+            idx = idx + len(CLRF)
+            for i in range(len_cmd):
+                n_idx = redis_str.find(CLRF, idx)
+                n_idx = redis_str.find(CLRF, n_idx + 1)
+                self.__data.append(
+                    RedisEntity.from_buffer(redis_str[idx:n_idx].encode())
+                )
+                idx = n_idx + len(CLRF)
+            return
+        if redis_str.startswith(RedisDataType.SIMPLE_STRING.value):
+            self.__data_type = RedisDataType.SIMPLE_STRING
+            self.__data = redis_str.split(CLRF)[1]
+            return
+        if redis_str.startswith(RedisDataType.INTEGER.value):
+            self.__data_type = RedisDataType.INTEGER
+            self.__data = int(redis_str.split(CLRF)[1])
+            return
+        if redis_str.startswith(RedisDataType.BULK_STRING.value):
+            self__data_type = RedisDataType.BULK_STRING
+            self.__data = redis_str.split(CLRF)[1]
+            return
+
+    def __str__(self):
+        if isinstance(self.__data, list):
+            return f"{[str(item) for item in self.__data]}"
+        return f"{self.__data}"
+
+    @property
+    def data(self):
+        return self.__data
 
 
 class RedisEnvironment:
@@ -94,7 +180,7 @@ class RedisCacheValue:
 
 
 class RedisRDBFile:
-    def __init__(self, filename):
+    def __init__(self, filename=None):
         self.__filename = filename
         self.__version = 11
         self.__metadata = {}
@@ -222,6 +308,18 @@ class RedisRDBFile:
         # with open(self.__filename, "rb") as f:
         #     f.write(out)
 
+    def to_bytes(self):
+        buff = bytearray()
+        buff.extend(f"REDIS{self.__version:04d}".encode())
+        buff.append(0xFA)
+        buff.extend(b"\x09redis-ver\x057.2.0")
+        buff.append(0xFA)
+        buff.extend(b"\x0aredis-bits\xc0@")
+        buff.extend(b"\xfe\x00")
+        buff.append(0xFF)
+        buff.extend(b"\x00\x00\x00\x00\x00\x00\x00\x00")
+        return buff
+
 
 class RedisCache:
     def __init__(self, env: RedisEnvironment) -> None:
@@ -292,4 +390,7 @@ class RedisCache:
 
 
 # if __name__ == "__main__":
-#     rdb = RDBFile("/Users/anitesh/Documents/Practice/dump.rdb")
+#     redisEntity = RedisEntity.from_buffer(
+#         "*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n".encode()
+#     )
+#     print(redisEntity)
