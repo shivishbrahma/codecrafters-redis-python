@@ -8,7 +8,7 @@ import time
 CLRF = "\r\n"
 
 
-class ResponseDataType(Enum):
+class RedisResponseDataType(Enum):
     SIMPLE_STRING = "+"
     SIMPLE_ERROR = "-"
     INTEGER = ":"
@@ -26,7 +26,45 @@ class ResponseDataType(Enum):
     PUSH = ">"
 
 
-class CacheValue:
+class RedisEnvironment:
+    def __init__(self):
+        self.__dir = os.getcwd()
+        self.__dbfilename = "dump.rdb"
+        self.__port = 6379
+        self.__role = "master"
+        self.__replicaof = None
+
+    def get(self, key: str):
+        if key == "dir":
+            return self.__dir
+        elif key == "dbfilename":
+            return self.__dbfilename
+        elif key == "port":
+            return self.__port
+        elif key == "role":
+            return self.__role
+        elif key == "replicaof":
+            return self.__replicaof
+        else:
+            return None
+
+    def set(self, key: str, value: str):
+        if key == "dir":
+            self.__dir = value
+        elif key == "dbfilename":
+            self.__dbfilename = value
+        elif key == "port":
+            self.__port = int(value)
+        elif key == "replicaof":
+            host, port = value.strip().split()
+            port = int(port)
+            self.__role = "slave"
+            self.__replicaof = (host, port)
+        else:
+            return None
+
+
+class RedisCacheValue:
     def __init__(self, value, expired_at, unit="s"):
         self.value = value
         self.expired_at = expired_at
@@ -36,30 +74,30 @@ class CacheValue:
         if self.expired_at == -1:
             return False
         current_time = time.time()
-        expire_in_s = self.expired_at if self.unit == "s" else self.expired_at / 1000
+        expire_in_s = self.expired_at
         return current_time > expire_in_s
 
     def __str__(self):
         return f"{self.value}"
 
     def __repr__(self):
-        return f"CacheValue(value={self.value}, expired_at={self.expired_at}, unit={self.unit})"
+        return f"{self.__class__.__name__}(value={self.value}, expired_at={self.expired_at}, unit={self.unit})"
 
 
-class RDBFile:
+class RedisRDBFile:
     def __init__(self, filename):
         self.__filename = filename
         self.__version = 11
         self.__metadata = {}
 
-    def __read_rdb_header(self, file):
+    def __read_rdb_header(self, file) -> None:
         # Header section
         header = file.read(9)
         if not header.startswith(b"REDIS"):
             raise Exception("Invalid RDB file")
         self.__version = int(header[-4:].decode())
 
-    def __read_length(self, file):
+    def __read_length(self, file) -> tuple[int, int]:
         first_byte = file.read(1)
         if not first_byte:
             raise ValueError("Unexpected EOF")
@@ -128,7 +166,7 @@ class RDBFile:
                 elif opcode == 0x00:
                     key = self.__read_string(f)
                     val = self.__read_string(f)
-                    data[key] = CacheValue(val, -1)
+                    data[key] = RedisCacheValue(val, -1)
                     continue
 
                 elif opcode == 0xFC:  # EXPIRETIMEMS
@@ -136,7 +174,9 @@ class RDBFile:
                     data_type = f.read(1)[0]
                     key = self.__read_string(f)
                     val = self.__read_string(f)
-                    data[key] = CacheValue(val, expired_at=expired_at, unit="ms")
+                    data[key] = RedisCacheValue(
+                        val, expired_at=expired_at / 1000, unit="ms"
+                    )
                     continue
 
                 elif opcode == 0xFD:  # EXPIRETIME
@@ -144,7 +184,7 @@ class RDBFile:
                     data_type = f.read(1)[0]
                     key = self.__read_string(f)
                     val = self.__read_string(f)
-                    data[key] = CacheValue(val, expired_at=expired_at)
+                    data[key] = RedisCacheValue(val, expired_at=expired_at)
                     continue
 
                 elif opcode == 0xFE:  # SELECTDB
@@ -174,11 +214,12 @@ class RDBFile:
         #     f.write(out)
 
 
-class Cache:
-    def __init__(self, dir=None, dbfilename="dump.rdb"):
-        self.__dir = dir if dir else os.getcwd()
-        self.__dbfilename = dbfilename
-        self.__rdb = RDBFile(os.path.join(self.__dir, self.__dbfilename))
+class RedisCache:
+    def __init__(self, env: RedisEnvironment) -> None:
+        self.__env = env
+        self.__rdb = RedisRDBFile(
+            os.path.join(self.__env.get("dir"), self.__env.get("dbfilename"))
+        )
         self.__cache = {}
 
         loaded_cache = self.__rdb.read()
@@ -190,20 +231,24 @@ class Cache:
         else:
             print("Cache initialized from scratch")
 
-    def set(self, key: str, value: str, expire: float = -1, unit="s"):
+    @property
+    def env(self) -> RedisEnvironment:
+        return self.__env
+
+    def set(self, key: str, value: str, expire: float = -1, unit="s") -> None:
         current_time = time.time()
         if expire > 0:
-            expired_at = (current_time * 1000 if unit == "ms" else current_time) + expire
+            expired_at = current_time + (expire / 1000 if unit == "ms" else expire)
         else:
             expired_at = -1
 
-        self.__cache[key] = CacheValue(
+        self.__cache[key] = RedisCacheValue(
             value,
             expired_at,
             unit,
         )
 
-    def get(self, key: str) -> CacheValue | None:
+    def get(self, key: str) -> RedisCacheValue | None:
         if key not in self.__cache:
             return None
         if self.__cache[key].is_expired():
@@ -214,15 +259,13 @@ class Cache:
     def delete(self, key: str):
         self.__cache.pop(key, None)
 
-    def get_config(self, key: str):
-        if key == "dir":
-            return self.__dir
-        elif key == "dbfilename":
-            return self.__dbfilename
+    def get_config(self, key: str) -> str | None:
+        if key == "dir" or key == "dfilename":
+            return self.env.get(key=key)
         else:
             return None
 
-    def save(self):
+    def save(self) -> bool:
         try:
             self.__rdb.write()
         except Exception as e:
@@ -231,7 +274,7 @@ class Cache:
 
         return True
 
-    def keys(self, pattern: str):
+    def keys(self, pattern: str) -> list[str]:
         if pattern:
             pat = re.compile(pattern=pattern.replace("*", ".*"))
             return [key for key in self.__cache.keys() if pat.findall(key)]
