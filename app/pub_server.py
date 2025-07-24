@@ -68,6 +68,9 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
                 False,
             )
 
+    if cmd[0] == "REPLCONF":
+        return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
+
     return (
         build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"),
         False,
@@ -90,8 +93,30 @@ def build_response(data_type: RedisResponseDataType, data=None) -> bytes:
 
 
 def init_replica(env):
-    replica_host, replica_port = env.get("replicaof")
-    replica_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    replica_socket.connect((replica_host, replica_port))
-    replica_socket.sendall(build_response(RedisResponseDataType.ARRAY, ["PING"]))
-    print(f"Connecting to replica on port {replica_host}:{replica_port}")
+    replica_port = env.get("port")
+    master_host, master_port = env.get("replicaof")
+    print(f"Connecting to replica on port {master_host}:{master_port}")
+    master_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    master_socket.connect((master_host, master_port))
+
+    master_socket.send(build_response(RedisResponseDataType.ARRAY, ["PING"]))
+    response = master_socket.recv(1024)
+    print(f"Master: {response}")
+
+    master_socket.send(
+        build_response(
+            RedisResponseDataType.ARRAY,
+            ["REPLCONF", "listening-port", str(replica_port)],
+        )
+    )
+    response = master_socket.recv(1024)
+    print(f"Master: {response}")
+
+    master_socket.send(
+        build_response(
+            RedisResponseDataType.ARRAY,
+            ["REPLCONF", "capa", "psync2"],
+        )
+    )
+    response = master_socket.recv(1024)
+    print(f"Master: {response}")
