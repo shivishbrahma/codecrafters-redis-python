@@ -71,6 +71,9 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
     if cmd[0] == "REPLCONF":
         return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
 
+    if cmd[0] == "PSYNC":
+        return (build_response(RedisResponseDataType.SIMPLE_STRING, "FULLRESYNC 0 0"), True)
+
     return (
         build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"),
         False,
@@ -115,7 +118,16 @@ def init_replica(env):
     master_socket.send(
         build_response(
             RedisResponseDataType.ARRAY,
-            ["REPLCONF", "capa", "psync2"],
+            ["REPLCONF", "capa", "eof"],
+        )
+    )
+    response = master_socket.recv(1024)
+    print(f"Master: {response}")
+
+    master_socket.send(
+        build_response(
+            RedisResponseDataType.ARRAY,
+            ["PSYNC", "?", "-1"],
         )
     )
     response = master_socket.recv(1024)
