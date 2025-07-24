@@ -17,7 +17,14 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
         return (build_response(RedisResponseDataType.BULK_STRING, cmd[1]), False)
 
     if cmd[0] == "INFO":
-        return (build_response(RedisResponseDataType.BULK_STRING, f"role:{cache.env.get('role')}"), False)
+        if cmd[1] == "replication":
+            replica_info = f"role:{cache.env.get('role')}"
+            replica_info+=f"\nmaster_replid:{cache.env.get('nmaster_replid')}"
+            replica_info+=f"\master_repl_offset:{cache.env.get('master_repl_offset')}"
+            return (
+                build_response(RedisResponseDataType.BULK_STRING, replica_info),
+                False,
+            )
 
     if cmd[0] == "SET":
         expire = -1
@@ -34,7 +41,10 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
     if cmd[0] == "GET":
         value = cache.get(cmd[1])
         if value:
-            return (build_response(RedisResponseDataType.BULK_STRING, value.value), False)
+            return (
+                build_response(RedisResponseDataType.BULK_STRING, value.value),
+                False,
+            )
         else:
             return (build_response(RedisResponseDataType.BULK_STRING, None), False)
 
@@ -58,7 +68,10 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
                 False,
             )
 
-    return (build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"), False)
+    return (
+        build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"),
+        False,
+    )
 
 
 def build_response(data_type: RedisResponseDataType, data=None) -> bytes:

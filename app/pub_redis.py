@@ -33,6 +33,8 @@ class RedisEnvironment:
         self.__port = 6379
         self.__role = "master"
         self.__replicaof = None
+        self.__master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+        self.__master_repl_offset = 0
 
     def get(self, key: str):
         if key == "dir":
@@ -43,6 +45,10 @@ class RedisEnvironment:
             return self.__port
         elif key == "role":
             return self.__role
+        elif key == "master_replid":
+            return self.__master_replid
+        elif key == "master_repl_offset":
+            return self.__master_repl_offset
         elif key == "replicaof":
             return self.__replicaof
         else:
