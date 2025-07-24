@@ -1,6 +1,6 @@
 import socket  # noqa: F401
 import threading
-from .pub_server import handle_request
+from .pub_server import handle_request, init_replica
 from .pub_redis import RedisCache, RedisEnvironment
 from argparse import ArgumentParser
 
@@ -52,8 +52,7 @@ def main():
     port = args.port
 
     if env.get("replicaof") is not None:
-        replica_host, replica_port = env.get("replicaof")
-        print(f"Connecting to replica on port {replica_host}:{replica_port}")
+        init_replica(env)
 
     server_socket = socket.create_server(("localhost", port), reuse_port=True)
     print(f"Server started on {server_socket.getsockname()}")

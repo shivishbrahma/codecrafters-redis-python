@@ -1,6 +1,6 @@
 from typing import Tuple
 import re
-import struct
+import socket
 from .pub_redis import CLRF, RedisResponseDataType, RedisCache
 
 
@@ -19,8 +19,8 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
     if cmd[0] == "INFO":
         if cmd[1] == "replication":
             replica_info = f"role:{cache.env.get('role')}"
-            replica_info+=f"\nmaster_replid:{cache.env.get('nmaster_replid')}"
-            replica_info+=f"\master_repl_offset:{cache.env.get('master_repl_offset')}"
+            replica_info += f"\nmaster_replid:{cache.env.get('nmaster_replid')}"
+            replica_info += f"\master_repl_offset:{cache.env.get('master_repl_offset')}"
             return (
                 build_response(RedisResponseDataType.BULK_STRING, replica_info),
                 False,
@@ -87,3 +87,11 @@ def build_response(data_type: RedisResponseDataType, data=None) -> bytes:
         for item in data:
             resp_buff.extend(build_response(RedisResponseDataType.BULK_STRING, item))
     return resp_buff
+
+
+def init_replica(env):
+    replica_host, replica_port = env.get("replicaof")
+    replica_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    replica_socket.connect((replica_host, replica_port))
+    replica_socket.sendall(build_response(RedisResponseDataType.ARRAY, ["PING"]))
+    print(f"Connecting to replica on port {replica_host}:{replica_port}")
