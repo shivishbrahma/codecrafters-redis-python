@@ -32,6 +32,7 @@ class RedisEnvironment:
         self.__dbfilename = "dump.rdb"
         self.__port = 6379
         self.__role = "master"
+        self.__replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.__replicaof = None
         self.__master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.__master_repl_offset = 0
@@ -51,6 +52,8 @@ class RedisEnvironment:
             return self.__master_repl_offset
         elif key == "replicaof":
             return self.__replicaof
+        elif key == "replid":
+            return self.__replid
         else:
             return None
 

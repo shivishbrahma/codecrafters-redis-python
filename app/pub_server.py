@@ -72,7 +72,7 @@ def handle_request(request_buffer: bytes, cache: RedisCache) -> Tuple[bytes, boo
         return (build_response(RedisResponseDataType.SIMPLE_STRING, "OK"), False)
 
     if cmd[0] == "PSYNC":
-        return (build_response(RedisResponseDataType.SIMPLE_STRING, "FULLRESYNC 0 0"), True)
+        return (build_response(RedisResponseDataType.SIMPLE_STRING, f"FULLRESYNC {cache.env.get('replid')} 0"), True)
 
     return (
         build_response(RedisResponseDataType.SIMPLE_ERROR, "Unknown command"),
